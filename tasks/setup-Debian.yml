@@ -1,0 +1,225 @@
+---
+- name: Checking if MySQL is already installed.
+  ansible.builtin.shell: which mysqld_safe
+  ignore_errors: true
+  register: check_mysqld
+  changed_when: false
+
+- name: Check if MySQL datadir looks initialized
+  ansible.builtin.stat:
+    path: "{{ (mysql_datadir | default('/var/lib/mysql')) ~ '/mysql' }}"
+  register: _deb_mysql_datadir_inited
+  changed_when: false
+
+- name: Updating apt cache if MySQL is not yet installed.
+  ansible.builtin.apt:
+    update_cache: yes
+  when: check_mysqld.rc != 0
+
+- name: Making sure MySQL/MariaDB packages are installed.
+  ansible.builtin.apt:
+    name: "{{ mysql_packages }}"
+    state: present
+  register: deb_mysql_install_packages
+
+- name: Making sure MySQL Python libraries are installed (Ubuntu <= 18).
+  ansible.builtin.apt:
+    name: python-mysqldb
+    state: present
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - ansible_distribution_major_version|int <= 18
+
+- name: Making sure MySQL Python3 libraries are installed (Ubuntu > 18).
+  ansible.builtin.apt:
+    name: python3-mysqldb
+    state: present
+  when:
+    - ansible_distribution == 'Ubuntu'
+    - ansible_distribution_major_version|int > 18
+
+# Only stop mysql on the very first install (when mysqld wasn't present before)
+- name: Making sure MySQL is stopped after initial install.
+  ansible.builtin.service:
+    name: "{{ mysql_daemon }}"
+    state: stopped
+  when:
+    - check_mysqld.rc != 0
+
+# Only remove ib_logfile* on first install AND only when datadir is not initialized yet
+- name: Deleting InnoDB log files created by apt package after initial install.
+  ansible.builtin.file:
+    path:
+      - "{{ mysql_datadir | default('/var/lib/mysql') }}/ib_logfile0"
+      - "{{ mysql_datadir | default('/var/lib/mysql') }}/ib_logfile1"
+    state: absent
+  when:
+    - check_mysqld.rc != 0
+    - not (_deb_mysql_datadir_inited.stat.exists | default(false))
+  notify: start mysql
+
+# ClusterControl repo (existing flow)
+- name: Checking if ClusterControl Controller is already installed.
+  ansible.builtin.stat:
+    path: /etc/sbin/cmon
+  register: cmon_installed
+  changed_when: false
+
+- name: Checking if ClusterControl repository file exists.
+  ansible.builtin.stat:
+    path: "{{ repo_config_path }}"
+  register: s9s_repo_installed
+  changed_when: false
+
+- name: Installing ClusterControl CLI GPG key (apt).
+  ansible.builtin.apt_key:
+    url: "{{ clustercontrol_cli_key }}"
+    state: present
+
+- name: Configuring ClusterControl CLI repository.
+  ansible.builtin.apt_repository:
+    repo: "{{ clustercontrol_cli_repository }}"
+    state: present
+
+- name: Installing Severalnines GPG key (apt).
+  ansible.builtin.apt_key:
+    state: present
+    url: "{{ gpg_key }}"
+  when: s9s_repo_installed.stat.exists == false
+
+- name: Installing ClusterControl repository file.
+  ansible.builtin.get_url:
+    url: "{{ repo_config_url }}"
+    dest: "{{ repo_config_path }}"
+    mode: "0644"
+  when: s9s_repo_installed.stat.exists == false
+  register: _deb_repo_file
+
+# Update cache only when we changed repos OR on first run (safe, reduces changed noise)
+- name: Updating apt cache after repository changes.
+  ansible.builtin.apt:
+    update_cache: yes
+  when:
+    - (_deb_repo_file is defined and _deb_repo_file.changed) or (s9s_repo_installed.stat.exists == false)
+
+# -----------------------------
+# Version selection logic (Debian)
+# Supports:
+# - latest
+# - 2.3.3           (auto-pick: use 2.3.3-* if exists, otherwise fallback to latest per package)
+# -----------------------------
+- name: Compute version mode (Debian)
+  ansible.builtin.set_fact:
+    cc_pin_version: "{{ (clustercontrol_version | default('latest') | string) != 'latest' and (clustercontrol_version | string | length) > 0 }}"
+    cc_semver_only: "{{ (clustercontrol_version | default('') | string) is match('^\\d+\\.\\d+\\.\\d+$') }}"
+  changed_when: false
+
+- name: Compute effective package state (Debian)
+  ansible.builtin.set_fact:
+    # When pinning, keep state=present to avoid upgrades.
+    # Autopick and fallback-to-latest are done by choosing "pkg=version" strings in "name".
+    cc_package_state_effective: "{{ 'present' if cc_pin_version else (cc_package_state | default('latest')) }}"
+  changed_when: false
+
+# Semver-only autopick + fallback per package
+- name: Resolve version for controller+UI packages (Debian, semver-only; fallback to latest)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    pinned="$(apt-cache madison {{ item }} | awk '{print $3}' | grep -E '^{{ clustercontrol_version | regex_escape() }}-' | head -n1 || true)"
+    if [ -n "$pinned" ]; then
+      echo "$pinned"
+      exit 0
+    fi
+    apt-cache madison {{ item }} | awk '{print $3}' | head -n1
+  args:
+    executable: /bin/bash
+  register: _cc_deb_versions
+  changed_when: false
+  when:
+    - cc_pin_version
+    - cc_semver_only
+  loop: "{{ (clustercontrol_controller_packages + clustercontrol_ui_packages) | unique }}"
+
+- name: Build package->version map (Debian, semver-only)
+  ansible.builtin.set_fact:
+    _cc_deb_ver_map: "{{ dict(_cc_deb_versions.results | map(attribute='item') | zip(_cc_deb_versions.results | map(attribute='stdout'))) }}"
+  changed_when: false
+  when:
+    - cc_pin_version
+    - cc_semver_only
+
+- name: Assert all versions resolved (Debian, semver-only)
+  ansible.builtin.assert:
+    that:
+      - (_cc_deb_ver_map[item] | default('') | length) > 0
+    fail_msg: "Could not resolve any repo version for package '{{ item }}' (check apt repo configuration)."
+  when:
+    - cc_pin_version
+    - cc_semver_only
+  loop: "{{ (clustercontrol_controller_packages + clustercontrol_ui_packages) | unique }}"
+
+# Build effective package lists:
+# - semver-only: pkg=<resolved version per pkg> (with fallback already applied)
+# - explicit version: pkg={{clustercontrol_version}}
+# - latest mode: just pkg names
+- name: Compute effective package lists (Debian)
+  ansible.builtin.set_fact:
+    clustercontrol_controller_packages_effective: >-
+      {{
+        (
+          clustercontrol_controller_packages
+          | map('regex_replace', '$', '=' ~ _cc_deb_ver_map[item])
+          | list
+        )
+        if (cc_pin_version and cc_semver_only)
+        else
+        (
+          (
+            clustercontrol_controller_packages
+            | map('regex_replace', '$', '=' ~ (clustercontrol_version | string))
+            | list
+          )
+          if cc_pin_version else clustercontrol_controller_packages
+        )
+      }}
+    clustercontrol_ui_packages_effective: >-
+      {{
+        (
+          clustercontrol_ui_packages
+          | map('regex_replace', '$', '=' ~ _cc_deb_ver_map[item])
+          | list
+        )
+        if (cc_pin_version and cc_semver_only)
+        else
+        (
+          (
+            clustercontrol_ui_packages
+            | map('regex_replace', '$', '=' ~ (clustercontrol_version | string))
+            | list
+          )
+          if cc_pin_version else clustercontrol_ui_packages
+        )
+      }}
+  vars:
+    # dummy var needed by jinja in map() expression; not used in non-semver branches
+    item: ""
+  changed_when: false
+
+- name: Installing ClusterControl Controller packages (from repo).
+  ansible.builtin.apt:
+    name: "{{ clustercontrol_controller_packages_effective }}"
+    state: "{{ cc_package_state_effective }}"
+  register: deb_clustercontrol_controller_install_packages
+
+- name: Installing ClusterControl UI packages (from repo).
+  ansible.builtin.apt:
+    name: "{{ clustercontrol_ui_packages_effective }}"
+    state: "{{ cc_package_state_effective }}"
+  register: deb_clustercontrol_ui_install_packages
+
+- name: Install ClusterControl CLI packages (always latest)
+  ansible.builtin.apt:
+    name: "{{ clustercontrol_cli_packages }}"
+    state: latest
+    update_cache: no
+  register: deb_clustercontrol_cli_install_packages

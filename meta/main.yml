@@ -1,0 +1,24 @@
+---
+dependencies: []
+
+galaxy_info:
+  author: severalnines
+  description: ClusterControl for RHEL/CentOS and Debian/Ubuntu.
+  company: "Severalnines AB"
+  license: "license (BSD, MIT)"
+  min_ansible_version: 2.17.14
+  platforms:
+    - name: EL
+      versions:
+      - "8"
+      - "9"
+    - name: Ubuntu
+      versions:
+      - jammy 
+      - noble
+    - name: Debian
+      versions:
+      - bullseye
+      - bookworm
+  galaxy_tags:
+    - database

@@ -1,0 +1,12 @@
+---
+- name: Check if root password has been configured.
+  stat: path="{{ mysql_user_home }}/.my.cnf"
+  register: root_password_configured
+
+- name: Copy .my.cnf file with root password credentials.
+  template:
+    src: "user-my.cnf.j2"
+    dest: "{{ mysql_user_home }}/.my.cnf"
+    owner: root
+    group: root
+    mode: 0600

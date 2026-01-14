@@ -1,0 +1,83 @@
+---
+- name: Ensure ClusterControl Controller is started and enabled on boot
+  service:
+    name: cmon
+    state: started
+    enabled: yes
+
+- name: Ensure ClusterControl Cloud is started and enabled on boot
+  service:
+    name: cmon-cloud
+    state: started
+    enabled: yes
+
+- name: Ensure ClusterControl SSH is started and enabled on boot
+  service:
+    name: cmon-ssh
+    state: started
+    enabled: yes
+
+- name: Ensure ClusterControl Events is started and enabled on boot
+  service:
+    name: cmon-events
+    state: started
+    enabled: yes
+
+#state kuber-proxy
+
+# --------------------------------------------------
+# Enable and start ClusterControl services (MCC)
+# Align with install-cc.sh behavior
+# --------------------------------------------------
+
+- name: Reload systemd daemon
+  ansible.builtin.command: systemctl daemon-reload
+  changed_when: false
+
+- name: Enable ClusterControl services on boot
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: yes
+  loop:
+    - cmon
+    - cmon-ssh
+    - cmon-events
+    - cmon-cloud
+    - cmon-proxy
+    - kuber-proxy
+
+- name: Restart ClusterControl services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - cmon
+    - cmon-ssh
+    - cmon-events
+    - cmon-cloud
+    - cmon-proxy
+    - kuber-proxy
+
+# --------------------------------------------------
+# Create ccsetup user for initial MCC registration
+# (matches install-cc.sh behavior)
+# --------------------------------------------------
+
+- name: Create ccsetup user for MCC initial registration
+  ansible.builtin.shell: |
+    export S9S_USER_CONFIG=/tmp/ccsetup.conf
+
+    s9s user --create \
+      --new-password=admin \
+      --group=admins \
+      --controller="https://localhost:9501" \
+      ccsetup || true
+
+    unset S9S_USER_CONFIG
+  args:
+    executable: /bin/bash
+  register: ccsetup_user_create
+  changed_when: >
+    ccsetup_user_create.stdout is defined and
+    ('created' in (ccsetup_user_create.stdout | lower))
+  failed_when: false

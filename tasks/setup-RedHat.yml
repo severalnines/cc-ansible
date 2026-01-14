@@ -1,0 +1,240 @@
+---
+- name: Disabling SElinux.
+  ansible.posix.selinux:
+    state: disabled
+
+- name: Installing MySQL/MariaDB packages.
+  ansible.builtin.yum:
+    name: "{{ mysql_packages }}"
+    state: present
+  register: rh_mysql_install_packages
+
+- name: Ensure MySQL Python libraries are installed.
+  ansible.builtin.yum:
+    name: "{{ python_mysql }}"
+    state: present
+
+# -------------------------------------------------------------------
+# Workaround for MySQL 8: initialize-insecure (NOT SAFE)
+# Mimic install-cc.sh behaviour to avoid temporary password flow.
+# This only runs when mysql-community-server 8.x is installed and datadir
+# is not initialized yet.
+# -------------------------------------------------------------------
+- name: Check if mysql-community-server is installed (RHEL)
+  ansible.builtin.command: rpm -q mysql-community-server
+  register: _rpm_mysql_community_server
+  changed_when: false
+  failed_when: false
+
+- name: Get mysql-community-server version (RHEL)
+  ansible.builtin.command: rpm -q --qf '%{VERSION}\n' mysql-community-server
+  register: _mysql_comm_ver
+  changed_when: false
+  failed_when: false
+  when: _rpm_mysql_community_server.rc == 0
+
+- name: Check if MySQL datadir is already initialized (marker dir)
+  ansible.builtin.stat:
+    path: "{{ (mysql_datadir | default('/var/lib/mysql')) ~ '/mysql' }}"
+  register: _mysql_datadir_inited
+  changed_when: false
+  when:
+    - _rpm_mysql_community_server.rc == 0
+    - (_mysql_comm_ver.stdout | default('')) is match('^8\\.')
+
+- name: Stop mysqld before initializing (MySQL 8 insecure init)  # only when NOT initialized
+  ansible.builtin.service:
+    name: "{{ mysql_daemon }}"
+    state: stopped
+  failed_when: false
+  when:
+    - _rpm_mysql_community_server.rc == 0
+    - (_mysql_comm_ver.stdout | default('')) is match('^8\\.')
+    - not (_mysql_datadir_inited.stat.exists | default(false))
+
+- name: Ensure MySQL datadir exists  # only when NOT initialized
+  ansible.builtin.file:
+    path: "{{ mysql_datadir | default('/var/lib/mysql') }}"
+    state: directory
+    owner: mysql
+    group: mysql
+    mode: "0755"
+  when:
+    - _rpm_mysql_community_server.rc == 0
+    - (_mysql_comm_ver.stdout | default('')) is match('^8\\.')
+    - not (_mysql_datadir_inited.stat.exists | default(false))
+
+- name: Initialize MySQL 8 insecure if not initialized yet (NOT SAFE)
+  ansible.builtin.command: >
+    mysqld --initialize-insecure --user=mysql --basedir=/usr --datadir={{ mysql_datadir | default('/var/lib/mysql') }}
+  args:
+    creates: "{{ (mysql_datadir | default('/var/lib/mysql')) ~ '/mysql' }}"
+  when:
+    - _rpm_mysql_community_server.rc == 0
+    - (_mysql_comm_ver.stdout | default('')) is match('^8\\.')
+    - not (_mysql_datadir_inited.stat.exists | default(false))
+
+- name: Check if ClusterControl Controller is already installed.
+  ansible.builtin.stat:
+    path: /etc/sbin/cmon
+  register: cmon_installed
+
+- name: Check if ClusterControl repository file exists.
+  ansible.builtin.stat:
+    path: "{{ repo_config_path }}"
+  register: s9s_repo_installed
+
+- name: Check if ClusterControl CLI repository file exists.
+  ansible.builtin.stat:
+    path: "{{ repo_cli_config_path }}"
+  register: s9s_cli_repo_installed
+
+- name: Install Severalnines GPG key (RPM).
+  ansible.builtin.rpm_key:
+    state: present
+    key: "{{ gpg_key }}"
+  when: not s9s_repo_installed.stat.exists
+
+- name: Download Severalnines Repository definition.
+  ansible.builtin.get_url:
+    url: "{{ repo_config_url }}"
+    dest: "{{ repo_config_path }}"
+    mode: "0644"
+  when: not s9s_repo_installed.stat.exists
+
+- name: Download Severalnines CLI Repository definition.
+  ansible.builtin.get_url:
+    url: "{{ clustercontrol_cli_repository }}"
+    dest: "{{ repo_cli_config_path }}"
+    mode: "0644"
+  when: not s9s_cli_repo_installed.stat.exists
+
+# -----------------------------
+# Version selection logic (RHEL)
+# Supports:
+# - latest
+# - 2.3.3           (auto-pick: use 2.3.3-* if exists, otherwise fallback to latest per package)
+# -----------------------------
+- name: Compute version mode (RedHat)
+  ansible.builtin.set_fact:
+    cc_pin_version: "{{ (clustercontrol_version | default('latest') | string) != 'latest' and (clustercontrol_version | string | length) > 0 }}"
+    cc_semver_only: "{{ (clustercontrol_version | default('') | string) is match('^\\d+\\.\\d+\\.\\d+$') }}"
+
+- name: Compute effective package state (RedHat)
+  ansible.builtin.set_fact:
+    # When pinning, keep state=present to avoid upgrades.
+    # Autopick and fallback-to-latest are done by choosing NEVRA strings in "name".
+    cc_package_state_effective: "{{ 'present' if cc_pin_version else (cc_package_state | default('latest')) }}"
+
+# -----------------------------
+# Semver-only autopick (2.3.3)
+# Try matching 2.3.3-* first; if not available, fallback to latest package version.
+# -----------------------------
+- name: Resolve NEVRA for controller packages (RedHat, semver-only; fallback to latest)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    pinned="$(dnf -q repoquery --show-duplicates --qf '%{name}-%{version}-%{release}.%{arch}' {{ item }} \
+      | grep -E '.*-{{ clustercontrol_version | regex_escape() }}-.*' \
+      | head -n1 || true)"
+    if [ -n "$pinned" ]; then
+      echo "$pinned"
+      exit 0
+    fi
+    dnf -q repoquery --latest-limit 1 --qf '%{name}-%{version}-%{release}.%{arch}' {{ item }}
+  args:
+    executable: /bin/bash
+  register: _cc_ctrl_nevra
+  changed_when: false
+  when:
+    - cc_pin_version
+    - cc_semver_only
+  loop: "{{ clustercontrol_controller_packages }}"
+
+- name: Resolve NEVRA for UI packages (RedHat, semver-only; fallback to latest)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    pinned="$(dnf -q repoquery --show-duplicates --qf '%{name}-%{version}-%{release}.%{arch}' {{ item }} \
+      | grep -E '.*-{{ clustercontrol_version | regex_escape() }}-.*' \
+      | head -n1 || true)"
+    if [ -n "$pinned" ]; then
+      echo "$pinned"
+      exit 0
+    fi
+    dnf -q repoquery --latest-limit 1 --qf '%{name}-%{version}-%{release}.%{arch}' {{ item }}
+  args:
+    executable: /bin/bash
+  register: _cc_ui_nevra
+  changed_when: false
+  when:
+    - cc_pin_version
+    - cc_semver_only
+  loop: "{{ clustercontrol_ui_packages }}"
+
+- name: Build effective package lists (RedHat, semver-only)
+  ansible.builtin.set_fact:
+    clustercontrol_controller_packages_effective: "{{ _cc_ctrl_nevra.results | map(attribute='stdout') | list }}"
+    clustercontrol_ui_packages_effective: "{{ _cc_ui_nevra.results | map(attribute='stdout') | list }}"
+  when:
+    - cc_pin_version
+    - cc_semver_only
+
+- name: Assert controller/UI package resolutions are non-empty (RedHat, semver-only)
+  ansible.builtin.assert:
+    that:
+      - (clustercontrol_controller_packages_effective | reject('equalto', '') | list | length) == (clustercontrol_controller_packages | length)
+      - (clustercontrol_ui_packages_effective | reject('equalto', '') | list | length) == (clustercontrol_ui_packages | length)
+    fail_msg: >-
+      Failed to resolve one or more packages from repoquery.
+      Run: dnf repoquery --show-duplicates <pkg> to verify repos are enabled and reachable.
+  when:
+    - cc_pin_version
+    - cc_semver_only
+
+# -----------------------------
+# Explicit release pin (2.3.3-16740)
+# Build name-version-release.arch strings directly.
+# -----------------------------
+- name: Compute version with arch (RedHat, explicit release)
+  ansible.builtin.set_fact:
+    _cc_ver_with_arch: "{{ (clustercontrol_version | string) ~ '.' ~ (ansible_architecture | default('x86_64')) }}"
+  when:
+    - cc_pin_version
+    - not cc_semver_only
+
+- name: Build effective package lists (RedHat, explicit release)
+  ansible.builtin.set_fact:
+    clustercontrol_controller_packages_effective: "{{ clustercontrol_controller_packages | map('regex_replace', '$', '-' ~ _cc_ver_with_arch) | list }}"
+    clustercontrol_ui_packages_effective: "{{ clustercontrol_ui_packages | map('regex_replace', '$', '-' ~ _cc_ver_with_arch) | list }}"
+  when:
+    - cc_pin_version
+    - not cc_semver_only
+
+# -----------------------------
+# Latest mode (no pin)
+# -----------------------------
+- name: Set effective package lists (RedHat, latest mode)
+  ansible.builtin.set_fact:
+    clustercontrol_controller_packages_effective: "{{ clustercontrol_controller_packages }}"
+    clustercontrol_ui_packages_effective: "{{ clustercontrol_ui_packages }}"
+  when: not cc_pin_version
+
+- name: Install ClusterControl Controller packages (from repo).
+  ansible.builtin.yum:
+    name: "{{ clustercontrol_controller_packages_effective }}"
+    state: "{{ cc_package_state_effective }}"
+    update_cache: yes
+  register: rh_clustercontrol_controller_install_packages
+
+- name: Install ClusterControl UI packages (from repo).
+  ansible.builtin.yum:
+    name: "{{ clustercontrol_ui_packages_effective }}"
+    state: "{{ cc_package_state_effective }}"
+    update_cache: yes
+  register: rh_clustercontrol_ui_install_packages
+
+- name: Install ClusterControl CLI packages (always latest)
+  ansible.builtin.yum:
+    name: "{{ clustercontrol_cli_packages }}"
+    state: latest
+    update_cache: yes
+  register: rh_clustercontrol_cli_install_packages

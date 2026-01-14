@@ -1,0 +1,54 @@
+---
+- name: restart mysql
+  ansible.builtin.service:
+    name: "{{ mysql_daemon }}"
+    state: restarted
+  listen: restart mysql
+
+- name: start mysql
+  ansible.builtin.service:
+    name: "{{ mysql_daemon }}"
+    state: started
+  listen: start mysql
+
+- name: restart cmon
+  ansible.builtin.service:
+    name: cmon
+    state: restarted
+  listen: restart cmon
+
+- name: restart cmon-cloud
+  ansible.builtin.service:
+    name: cmon-cloud
+    state: restarted
+  listen: restart cmon-cloud
+
+- name: restart cmon-ssh
+  ansible.builtin.service:
+    name: cmon-ssh
+    state: restarted
+  listen: restart cmon-ssh
+
+- name: restart cmon-events
+  ansible.builtin.service:
+    name: cmon-events
+    state: restarted
+  listen: restart cmon-events
+
+- name: restart cmon-proxy
+  ansible.builtin.service:
+    name: cmon-proxy
+    state: restarted
+  listen: restart cmon-proxy
+
+- name: restart clustercontrol services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - cmon
+    - cmon-proxy
+    - cmon-cloud
+    - cmon-ssh
+    - cmon-events
+  listen: restart clustercontrol services

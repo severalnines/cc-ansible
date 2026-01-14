@@ -1,0 +1,45 @@
+---
+# =========================
+# MySQL / MariaDB settings
+# =========================
+__mysql_daemon: mysqld
+
+__mysql_packages:
+  - mysql
+  - mysql-server
+
+__mysql_slow_query_log_file: /var/log/mysql-slow.log
+
+mysql_config_file: /etc/my.cnf
+mysql_config_include_dir: /etc/my.cnf.d
+mysql_socket: /var/lib/mysql/mysql.sock
+
+# =========================
+# Repository configuration
+# =========================
+repo_config_dir: /etc/yum.repos.d
+repo_config_path: /etc/yum.repos.d/s9s-repo.repo
+repo_cli_config_path: /etc/yum.repos.d/s9s-tools.repo
+
+# ClusterControl main repository (common for all RHEL-based systems)
+repo_config_url: http://www.severalnines.com/downloads/cmon/s9s-repo.repo
+
+# s9s-tools repository
+# Automatically selects the correct repository based on
+# the RHEL major version (7, 8, or 9).
+clustercontrol_cli_repository: >-
+  https://repo.severalnines.com/s9s-tools/RHEL_{{
+    (ansible_distribution_major_version | int)
+      if (ansible_distribution_major_version | int) in [7, 8, 9]
+      else 8
+  }}/s9s-tools.repo
+
+# Python MySQL client library:
+# - RHEL 7 uses MySQL-python
+# - RHEL 8+ uses python3-PyMySQL
+python_mysql: >-
+  {{
+    'MySQL-python'
+      if (ansible_distribution_major_version | int) < 8
+      else 'python3-PyMySQL'
+  }}

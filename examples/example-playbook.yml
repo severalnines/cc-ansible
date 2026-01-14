@@ -1,0 +1,24 @@
+---
+- hosts: cc
+  become: yes
+
+  vars:
+    # mysql cred
+    mysql_root_username: "root"
+    mysql_root_password: "MySQLRootPassw0rd!"
+    cmon_mysql_password: "MySQLCmonPassw0rd!"
+    cmon_mysql_user: "cmon"
+
+    # Run mode
+    cc_install_mode: "mcc"
+    cc_package_state: "latest"   # "latest" / "present"
+
+    # ClusterControl version
+    clustercontrol_version: "2.3.3" # "latest" / fix version ( eg. "2.3.3" )
+
+    # MCC settings
+    mcc_web_port: 443
+    mcc_web_root: "/var/www/html/clustercontrol-mcc"
+
+  roles:
+    - severalnines.clustercontrol

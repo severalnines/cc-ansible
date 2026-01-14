@@ -1,0 +1,156 @@
+---
+# -------------------------------------------------------------------
+# Idempotent init (SAFE):
+# - Only remove /etc/cmon.cnf when we will run cmon --init (first init)
+# - Generate rpc token once and store on disk
+# - Run cmon --init once (guarded by marker)
+# - Ensure cmon + cmon-proxy are started/enabled every run (idempotent)
+# - Run ccmgradm init once (guarded by marker)
+# - Restart services only when needed (handler)
+# -------------------------------------------------------------------
+
+- name: Ensure CMON state dir exists
+  ansible.builtin.file:
+    path: /var/lib/cmon
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# ---------- Check init markers early ----------
+- name: Check if CMON already initialized (marker)
+  ansible.builtin.stat:
+    path: /var/lib/cmon/.ansible-cmon-initialized
+  register: _cmon_inited
+  changed_when: false
+
+- name: Check if MCC already initialized (marker)
+  ansible.builtin.stat:
+    path: /var/lib/cmon/.ansible-mcc-initialized
+  register: _mcc_inited
+  changed_when: false
+
+# ---------- Remove default /etc/cmon.cnf ONLY on first init ----------
+- name: Check if /etc/cmon.cnf exists
+  ansible.builtin.stat:
+    path: /etc/cmon.cnf
+  register: _cmoncnf_stat
+  changed_when: false
+
+- name: Remove default /etc/cmon.cnf from package (only before first cmon --init)
+  ansible.builtin.file:
+    path: /etc/cmon.cnf
+    state: absent
+  when:
+    - not (_cmon_inited.stat.exists | default(false))
+    - _cmoncnf_stat.stat.exists | default(false)
+
+# ---------- Token (generate once) ----------
+- name: Check if rpc token file exists
+  ansible.builtin.stat:
+    path: /var/lib/cmon/cc_rpc_token
+  register: _cc_rpc_token_file
+  changed_when: false
+
+- name: Generate cc_api_token (one-time) and persist
+  ansible.builtin.shell: "cat /proc/sys/kernel/random/uuid | sha1sum | cut -f1 -d' '"
+  register: _cc_api_token_new
+  changed_when: true
+  when: not _cc_rpc_token_file.stat.exists
+
+- name: Save rpc token to file
+  ansible.builtin.copy:
+    dest: /var/lib/cmon/cc_rpc_token
+    content: "{{ _cc_api_token_new.stdout | trim }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not _cc_rpc_token_file.stat.exists
+
+- name: Read existing rpc token
+  ansible.builtin.slurp:
+    src: /var/lib/cmon/cc_rpc_token
+  register: _cc_rpc_token_slurp
+  changed_when: false
+
+- name: Set cc_api_token fact (from file)
+  ansible.builtin.set_fact:
+    cc_api_token: "{{ (_cc_rpc_token_slurp.content | b64decode | trim) }}"
+  changed_when: false
+
+# ---------- Ensure services are up BEFORE init ----------
+- name: Ensure cmon is started and enabled
+  ansible.builtin.service:
+    name: cmon
+    state: started
+    enabled: yes
+  changed_when: false
+
+# ---------- cmon --init (run once) ----------
+- name: Init CMON database (one-time)
+  ansible.builtin.command: >
+    cmon --init
+    --mysql-hostname="127.0.0.1"
+    --mysql-port="{{ cmon_mysql_port }}"
+    --mysql-username="{{ cmon_mysql_user | default('cmon') }}"
+    --mysql-password="{{ cmon_mysql_password }}"
+    --mysql-database="cmon"
+    --hostname="{{ ansible_default_ipv4.address }}"
+    --rpc-token="{{ cc_api_token }}"
+    --controller-id="clustercontrol"
+  register: cmon_init
+  changed_when: true
+  when: not (_cmon_inited.stat.exists | default(false))
+  notify:
+    - restart cmon
+    - restart cmon-proxy
+
+- name: Create CMON init marker
+  ansible.builtin.file:
+    path: /var/lib/cmon/.ansible-cmon-initialized
+    state: touch
+    mode: "0644"
+  when: not (_cmon_inited.stat.exists | default(false))
+
+# ---------- MCC init (run once) ----------
+- name: Check if ccmgradm exists
+  ansible.builtin.command: which ccmgradm
+  register: ccmgradm_check
+  changed_when: false
+  failed_when: ccmgradm_check.rc != 0
+
+- name: Ensure cmon-proxy is started and enabled (pre-MCC init)
+  ansible.builtin.service:
+    name: cmon-proxy
+    state: started
+    enabled: yes
+  changed_when: false
+
+- name: Initialize MCC (cmon-proxy) (one-time)
+  ansible.builtin.command: >
+    ccmgradm init --local-cmon -p {{ mcc_web_port }} -f {{ mcc_web_root }}
+  register: mcc_init
+  when: not (_mcc_inited.stat.exists | default(false))
+  failed_when: >
+    mcc_init.rc != 0 and
+    ('controller already exists with this url' not in
+      (((mcc_init.stdout | default('')) ~ ' ' ~ (mcc_init.stderr | default(''))) | lower)
+    )
+  changed_when: true
+  notify:
+    - restart cmon-proxy
+
+- name: Create MCC init marker
+  ansible.builtin.file:
+    path: /var/lib/cmon/.ansible-mcc-initialized
+    state: touch
+    mode: "0644"
+  when: not (_mcc_inited.stat.exists | default(false))
+
+# Final: ensure services are up (idempotent)
+- name: Ensure cmon-proxy is started and enabled (final)
+  ansible.builtin.service:
+    name: cmon-proxy
+    state: started
+    enabled: yes
+  changed_when: false

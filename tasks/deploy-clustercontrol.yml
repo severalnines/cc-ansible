@@ -1,0 +1,98 @@
+---
+# -------------------------
+# Load OS specific variables
+# -------------------------
+- name: Include OS-specific variables.
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+
+# NOTE:
+# We intentionally do NOT include RedHat7/RedHat8/Debian8/Debian10/Debian11 here anymore.
+# All per-version logic is consolidated into vars/RedHat.yml and vars/Debian.yml.
+
+# -------------------------
+# Define derived variables
+# -------------------------
+- name: Define mysql_packages.
+  ansible.builtin.set_fact:
+    mysql_packages: "{{ __mysql_packages | list }}"
+  when: mysql_packages is not defined
+
+- name: Define mysql_daemon.
+  ansible.builtin.set_fact:
+    mysql_daemon: "{{ __mysql_daemon }}"
+  when: mysql_daemon is not defined
+
+- name: Define cmon_ssh_key_path.
+  ansible.builtin.set_fact:
+    cmon_ssh_key_path: "/home/{{ cmon_ssh_user }}/.ssh/id_rsa"
+  when: cmon_ssh_user != 'root'
+
+- name: Define cmon_ssh_key_dir.
+  ansible.builtin.set_fact:
+    cmon_ssh_key_dir: "/home/{{ cmon_ssh_user }}/.ssh"
+  when: cmon_ssh_user != 'root'
+
+# -------------------------
+# Installation tasks
+# -------------------------
+# - name: Ensure python3 is installed (RHEL8+).
+#   ansible.builtin.include_tasks: setup-RedHat8.yml
+#   when: ansible_os_family == 'RedHat' and ansible_distribution_major_version|int >= 8
+
+- name: Setup packages on RedHat family.
+  ansible.builtin.include_tasks: setup-RedHat.yml
+  when: ansible_os_family == 'RedHat'
+
+- name: Setup packages on Debian family.
+  ansible.builtin.include_tasks: setup-Debian.yml
+  when: ansible_os_family == 'Debian'
+
+# -------------------------
+# Installation status facts
+# -------------------------
+- name: Check if MySQL/MariaDB packages were installed.
+  ansible.builtin.set_fact:
+    mysql_install_packages: >-
+      {{
+        (rh_mysql_install_packages is defined and rh_mysql_install_packages.changed) or
+        (deb_mysql_install_packages is defined and deb_mysql_install_packages.changed)
+      }}
+
+- name: Check if ClusterControl UI packages were installed.
+  ansible.builtin.set_fact:
+    clustercontrol_ui_install_packages: >-
+      {{
+        (rh_clustercontrol_ui_install_packages is defined and rh_clustercontrol_ui_install_packages.changed) or
+        (deb_clustercontrol_ui_install_packages is defined and deb_clustercontrol_ui_install_packages.changed)
+      }}
+
+- name: Check if ClusterControl Controller package was installed.
+  ansible.builtin.set_fact:
+    clustercontrol_controller_install_packages: >-
+      {{
+        (rh_clustercontrol_controller_install_packages is defined and rh_clustercontrol_controller_install_packages.changed) or
+        (deb_clustercontrol_controller_install_packages is defined and deb_clustercontrol_controller_install_packages.changed)
+      }}
+
+# -------------------------
+# Configure backend database
+# -------------------------
+- name: Configure MySQL/MariaDB.
+  ansible.builtin.include_tasks: configure-mysql.yml
+
+- name: Secure installation.
+  ansible.builtin.include_tasks: secure-installation.yml
+
+# - name: Create users.
+#   ansible.builtin.include_tasks: users.yml
+
+- name: Configure MCC (no Apache).
+  ansible.builtin.include_tasks: configure-mcc.yml
+  when: cc_install_mode == "mcc"
+
+# -------------------------
+# Configure ClusterControl
+# -------------------------
+- name: Configure ClusterControl (MCC).
+  ansible.builtin.include_tasks: clustercontrol-mcc.yml
+  when: cc_install_mode == "mcc"

@@ -1,0 +1,109 @@
+---
+- name: Ensure MySQL config variables have sane defaults
+  ansible.builtin.set_fact:
+    mysql_port: "{{ mysql_port | default(cmon_mysql_port | default(3306)) }}"
+    mysql_bind_address: "{{ mysql_bind_address | default('0.0.0.0') }}"
+    mysql_datadir: "{{ mysql_datadir | default('/var/lib/mysql') }}"
+    mysql_pid_file: "{{ mysql_pid_file | default((mysql_datadir | default('/var/lib/mysql')) ~ '/mysql.pid') }}"
+    mysql_user_home: "{{ mysql_user_home | default('/root') }}"
+  changed_when: false
+
+- name: Copy my.cnf global MySQL configuration
+  ansible.builtin.template:
+    src: my.cnf.j2
+    dest: "{{ mysql_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: "{{ overwrite_global_mycnf | default(true) }}"
+  notify: restart mysql
+
+- name: Ensure MySQL is started and enabled on boot
+  ansible.builtin.service:
+    name: "{{ mysql_daemon }}"
+    state: started
+    enabled: "{{ mysql_enabled_on_startup | default(true) }}"
+
+# -------------------------------------------------------------------
+# Root password bootstrap:
+# - If root login without password works (initialize-insecure) -> set password
+# -------------------------------------------------------------------
+- name: Check if we can login as root without password (insecure init case)
+  ansible.builtin.command: >
+    mysql --no-defaults
+    -u {{ mysql_root_username | default('root') }}
+    -NBe "SELECT 1;"
+  register: _mysql_root_login_nopw
+  changed_when: false
+  failed_when: false
+  no_log: false
+
+- name: Set MySQL root password if root has no password yet
+  ansible.builtin.command: >
+    mysql
+    -u {{ mysql_root_username | default('root') }}
+    -NBe "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '{{ mysql_root_password }}';"
+  register: _mysql_set_root_password
+  changed_when: _mysql_set_root_password.rc == 0
+  failed_when: _mysql_set_root_password.rc != 0
+  when:
+    - _mysql_root_login_nopw.rc == 0
+  no_log: false
+
+# -------------------------------------------------------------------
+# configure_database_server() equivalent (idempotent):
+# - create 'cmon' user for localhost, 127.0.0.1, and this host IP
+# - enforce mysql_native_password
+# - grant ALL PRIVILEGES WITH GRANT OPTION
+#
+# Only apply changes when:
+# - user missing, OR
+# - plugin not mysql_native_password, OR
+# - password hash differs
+# -------------------------------------------------------------------
+
+- name: Determine ClusterControl MySQL cmon user and host ip
+  ansible.builtin.set_fact:
+    cmon_mysql_user: "{{ cmon_mysql_user | default('cmon') }}"
+    cmon_mysql_hosts:
+      - "localhost"
+      - "127.0.0.1"
+      - "{{ ansible_default_ipv4.address }}"
+  changed_when: false
+
+- name: Check if cmon user exists and matches mysql_native_password + password (per host)
+  ansible.builtin.command: >
+    mysql -u {{ mysql_root_username | default('root') }}
+    -p{{ mysql_root_password }}
+    -NBe "
+      SELECT
+        CASE
+          WHEN COUNT(*)=0 THEN 'MISSING'
+          WHEN MAX(plugin) <> 'mysql_native_password' THEN 'PLUGIN_DIFF'
+          WHEN MAX(authentication_string) = CONCAT('*', UPPER(SHA1(UNHEX(SHA1('{{ cmon_mysql_password }}'))))) THEN 'OK'
+          ELSE 'PASS_DIFF'
+        END
+      FROM mysql.user
+      WHERE user='{{ cmon_mysql_user }}' AND host='{{ item }}';
+    "
+  register: _cmon_user_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ cmon_mysql_hosts }}"
+  no_log: false
+
+- name: Create/Update cmon users + grant privileges (configure_database_server) only when needed
+  ansible.builtin.command: >
+    mysql -u {{ mysql_root_username | default('root') }}
+    -p{{ mysql_root_password }}
+    -NBe "
+    CREATE USER IF NOT EXISTS '{{ cmon_mysql_user }}'@'{{ item.item }}' IDENTIFIED WITH mysql_native_password BY '{{ cmon_mysql_password }}';
+    ALTER USER '{{ cmon_mysql_user }}'@'{{ item.item }}' IDENTIFIED WITH mysql_native_password BY '{{ cmon_mysql_password }}';
+    GRANT ALL PRIVILEGES ON *.* TO '{{ cmon_mysql_user }}'@'{{ item.item }}' WITH GRANT OPTION;
+    FLUSH PRIVILEGES;
+    "
+  loop: "{{ _cmon_user_check.results }}"
+  when: item.stdout is search('^(MISSING|PLUGIN_DIFF|PASS_DIFF)$')
+  changed_when: true
+  failed_when: false
+  no_log: false
