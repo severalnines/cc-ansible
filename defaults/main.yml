@@ -71,33 +71,6 @@ cc_admin:
 #   email: "demo@severalnines.com"
 #   password: "test123"
 
-## License ##
-# If you have a valid license, define it here with "set: true"
-cc_license:
-  - set: false
-#   email: "demo@severalnines.com"
-#   company: "Severalnines AB"
-#   expired_date: "31/12/2017"
-#   key: "XXXXXXXXXXXXXXXXXXXXXXXX"
-
-## LDAP (experimental) ##
-# If you would like to integrate LDAP authentication with ClusterControl,
-# define the settings here with "set: true" and "enabled: 1"
-cc_ldap:
-  - set: false
-#   enabled: 1
-#   host: "192.168.1.100"
-#   port: 389
-#   base_dn: "dc=mydomain,dc=com"
-#   admin_dn: "cn=admin,dc=mydomain,dc=com"
-#   admin_password: "password"
-#   user_dn: "ou=People,dc=mydomain,dc=com"
-#   group_dn: "ou=Group,dc=mydomain,dc=com"
-
-## Database Cluster ##
-cc_cluster:
-  - deployment: false
-
 # ===============================
 # MySQL/MariaDB on ClusterControl
 # ===============================

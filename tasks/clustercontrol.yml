@@ -68,44 +68,6 @@
   become: true
   become_user: "{{ cmon_ssh_user }}"
 
-- name: Configure ClusterControl license.
-  shell: >
-    mysql -u root -NBe
-    "REPLACE INTO cmon.license
-    (email, company, exp_date, lickey)
-    VALUES
-    ('{{ item.email }}', '{{ item.company }}', '{{ item.expired_date }}', '{{ item.key }}')"
-  with_items: "{{ cc_license }}"
-  when:
-    item.email        is defined and
-    item.company      is defined and
-    item.expired_date is defined and
-    item.key          is defined and
-    item.set
-  become: true
-  become_user: "{{ cmon_ssh_user }}"
-
-- name: Configure ClusterControl LDAP settings.
-  shell: >
-    mysql -u root -NBe
-    "REPLACE INTO dcps.ldap_settings
-    (id, enable_ldap_auth, host, port, login, base_dsn, user_dn, group_dn)
-    VALUES
-    (1, {{ item.enabled }}, '{{ item.host }}', '{{ item.port }}', '{{ item.admin_dn }}', '{{ item.base_dn }}', '{{ item.user_dn }}', '{{ item.group_dn }}')"
-  with_items: "{{ cc_ldap }}"
-  when:
-    item.enabled        is defined and
-    item.host           is defined and
-    item.port           is defined and
-    item.admin_dn       is defined and
-    item.admin_password is defined and
-    item.base_dn        is defined and
-    item.user_dn        is defined and
-    item.group_dn       is defined and
-    item.set
-  become: true
-  become_user: "{{ cmon_ssh_user }}"
-
 - name: Check if SSH key for user '{{ cmon_ssh_user }}' is exist.
   stat:
     path: "{{ cmon_ssh_key_path }}"
