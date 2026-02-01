@@ -21,4 +21,4 @@
     mcc_web_root: "/var/www/html/clustercontrol-mcc"
 
   roles:
-    - severalnines.clustercontrol
+    - severalnines.cc-ansible
