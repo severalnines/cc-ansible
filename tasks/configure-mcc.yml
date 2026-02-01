@@ -6,7 +6,6 @@
 # - Run cmon --init once (guarded by marker)
 # - Ensure cmon + cmon-proxy are started/enabled every run (idempotent)
 # - Run ccmgradm init once (guarded by marker)
-# - Restart services only when needed (handler)
 # -------------------------------------------------------------------
 
 - name: Ensure CMON state dir exists
@@ -17,7 +16,7 @@
     group: root
     mode: "0755"
 
-# ---------- Check init markers early ----------
+# ---------- Check init markers ----------
 - name: Check if CMON already initialized (marker)
   ansible.builtin.stat:
     path: /var/lib/cmon/.ansible-cmon-initialized
@@ -55,8 +54,8 @@
 - name: Generate cc_api_token (one-time) and persist
   ansible.builtin.shell: "cat /proc/sys/kernel/random/uuid | sha1sum | cut -f1 -d' '"
   register: _cc_api_token_new
-  changed_when: true
   when: not _cc_rpc_token_file.stat.exists
+  changed_when: true
 
 - name: Save rpc token to file
   ansible.builtin.copy:
@@ -78,12 +77,14 @@
     cc_api_token: "{{ (_cc_rpc_token_slurp.content | b64decode | trim) }}"
   changed_when: false
 
-# ---------- Ensure services are up BEFORE init ----------
-- name: Ensure cmon is started and enabled
+# ---------- PRE-INIT: make sure cmon is NOT started ----------
+- name: Ensure cmon is stopped before first init
   ansible.builtin.service:
     name: cmon
-    state: started
+    state: stopped
     enabled: yes
+  when: not (_cmon_inited.stat.exists | default(false))
+  failed_when: false
   changed_when: false
 
 # ---------- cmon --init (run once) ----------
@@ -91,7 +92,7 @@
   ansible.builtin.command: >
     cmon --init
     --mysql-hostname="127.0.0.1"
-    --mysql-port="{{ cmon_mysql_port }}"
+    --mysql-port="{{ cmon_mysql_port | default(3306) }}"
     --mysql-username="{{ cmon_mysql_user | default('cmon') }}"
     --mysql-password="{{ cmon_mysql_password }}"
     --mysql-database="cmon"
@@ -99,8 +100,8 @@
     --rpc-token="{{ cc_api_token }}"
     --controller-id="clustercontrol"
   register: cmon_init
-  changed_when: true
   when: not (_cmon_inited.stat.exists | default(false))
+  changed_when: true
   notify:
     - restart cmon
     - restart cmon-proxy
@@ -112,7 +113,7 @@
     mode: "0644"
   when: not (_cmon_inited.stat.exists | default(false))
 
-# ---------- MCC init (run once) ----------
+# ---------- MCC init ----------
 - name: Check if ccmgradm exists
   ansible.builtin.command: which ccmgradm
   register: ccmgradm_check
@@ -147,7 +148,14 @@
     mode: "0644"
   when: not (_mcc_inited.stat.exists | default(false))
 
-# Final: ensure services are up (idempotent)
+# ---------- FINAL: ensure services are up ----------
+- name: Ensure cmon is started and enabled (final)
+  ansible.builtin.service:
+    name: cmon
+    state: started
+    enabled: yes
+  changed_when: false
+
 - name: Ensure cmon-proxy is started and enabled (final)
   ansible.builtin.service:
     name: cmon-proxy

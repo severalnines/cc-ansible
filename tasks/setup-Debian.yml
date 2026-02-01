@@ -11,12 +11,130 @@
   register: _deb_mysql_datadir_inited
   changed_when: false
 
+# ---------------------------------------
+# Compute vars (Debian/Ubuntu) - MySQL only
+# ---------------------------------------
+- name: Compute Debian/Ubuntu major version as int
+  ansible.builtin.set_fact:
+    __deb_major: "{{ ansible_distribution_major_version | int }}"
+  changed_when: false
+
+- name: Compute apt python binding flag (Debian/Ubuntu)
+  ansible.builtin.set_fact:
+    __use_python3_apt: >-
+      {{
+        (ansible_distribution == 'Debian' and ((__deb_major | int) >= 11)) or
+        (ansible_distribution == 'Ubuntu' and ((__deb_major | int) >= 20))
+      }}
+  changed_when: false
+
+- name: Compute python apt binding package name
+  ansible.builtin.set_fact:
+    python_apt_pkg: "{{ 'python3-apt' if (__use_python3_apt | bool) else 'python-apt' }}"
+  changed_when: false
+
+- name: Set mysql_daemon + mysql_packages (MySQL only)
+  ansible.builtin.set_fact:
+    mysql_daemon: "mysql"
+    mysql_packages: "{{ (__mysql_packages | list) + [python_apt_pkg] }}"
+  changed_when: false
+
+# Recommended bootstrap to avoid apt python binding issues
+- name: Ensure python apt bindings present (bootstrap)
+  ansible.builtin.raw: >
+    apt-get update -y &&
+    apt-get install -y {{ python_apt_pkg }}
+  changed_when: false
+
+# ---------------------------------------
+# Existing tasks (keep your current ones)
+# ---------------------------------------
 - name: Updating apt cache if MySQL is not yet installed.
   ansible.builtin.apt:
     update_cache: yes
   when: check_mysqld.rc != 0
 
-- name: Making sure MySQL/MariaDB packages are installed.
+# ---------------------------------------
+# MySQL official APT repository (Debian/Ubuntu)
+# ---------------------------------------
+
+- name: Install prerequisites for key management (gnupg, ca-certificates)
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - ca-certificates
+    state: present
+    update_cache: yes
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Download MySQL APT repo package
+  ansible.builtin.get_url:
+    url: https://repo.mysql.com/mysql-apt-config.deb
+    dest: /tmp/mysql-apt-config.deb
+    mode: "0644"
+
+- name: Install MySQL APT repo (non-interactive)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/mysql-apt-config.deb
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/sources.list.d/mysql.list
+  changed_when: false
+
+# Workaround: refresh repo signing key from Ubuntu keyserver
+- name: Install MySQL repo signing key via HTTPS (Ubuntu keyserver)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB7B3B788A8D3785C" -o /tmp/mysql-keyserver.asc
+    gpg --import /tmp/mysql-keyserver.asc
+    gpg --yes --output /usr/share/keyrings/mysql-apt-config.gpg --export BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
+    rm -f /tmp/mysql-keyserver.asc
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Update apt cache after adding MySQL repo
+  ansible.builtin.apt:
+    update_cache: yes
+
+# --- Pin MySQL packages to repo.mysql.com ---
+- name: Pin MySQL packages to repo.mysql.com
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/mysql
+    mode: "0644"
+    content: |
+      Package: mysql-*
+      Pin: origin "repo.mysql.com"
+      Pin-Priority: 1001
+
+- name: Update apt cache after pinning
+  ansible.builtin.apt:
+    update_cache: yes
+
+# --- Fix dpkg/apt broken state (important if previous attempt failed) ---
+- name: Fix interrupted dpkg state (if any)
+  ansible.builtin.shell: |
+    set -e
+    dpkg --configure -a || true
+    apt-get -f install -y || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+# --- Ensure mysql-common comes from MySQL repo before mysql-server ---
+- name: Install/upgrade mysql-common from MySQL repo first
+  ansible.builtin.apt:
+    name: mysql-common
+    state: latest
+    update_cache: no
+
+- name: Making sure MySQL packages are installed.
   ansible.builtin.apt:
     name: "{{ mysql_packages }}"
     state: present
@@ -38,7 +156,6 @@
     - ansible_distribution == 'Ubuntu'
     - ansible_distribution_major_version|int > 18
 
-# Only stop mysql on the very first install (when mysqld wasn't present before)
 - name: Making sure MySQL is stopped after initial install.
   ansible.builtin.service:
     name: "{{ mysql_daemon }}"
@@ -46,7 +163,6 @@
   when:
     - check_mysqld.rc != 0
 
-# Only remove ib_logfile* on first install AND only when datadir is not initialized yet
 - name: Deleting InnoDB log files created by apt package after initial install.
   ansible.builtin.file:
     path:

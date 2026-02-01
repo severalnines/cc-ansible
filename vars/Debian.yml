@@ -1,55 +1,13 @@
 ---
-# ==========================
-# Helper variables
-# ==========================
-__deb_major: "{{ ansible_distribution_major_version | int }}"
-
-# Determines whether the system is considered "modern" Debian/Ubuntu
-# (used for Apache paths and package selection)
-__is_modern_deb: >-
-  {{
-    (ansible_distribution == 'Debian' and __deb_major >= 8) or
-    (ansible_distribution == 'Ubuntu' and __deb_major >= 14)
-  }}
-
-# Debian 10+ uses MariaDB instead of MySQL
-__use_mariadb: >-
-  {{
-    ansible_distribution == 'Debian' and __deb_major >= 10
-  }}
-
-# Debian 11+ and Ubuntu 20+ require python3-apt
-__use_python3_apt: >-
-  {{
-    (ansible_distribution == 'Debian' and __deb_major >= 11) or
-    (ansible_distribution == 'Ubuntu' and __deb_major >= 20)
-  }}
-
 # ===============================
-# MySQL / MariaDB configuration
+# MySQL only (no MariaDB)
 # ===============================
-__mysql_daemon: "{{ 'mysql' if not __use_mariadb else 'mariadb' }}"
-
 __mysql_packages:
   - mysql-common
   - mysql-server
   - mysql-client
 
-__mysql_packages_mariadb:
-  - mariadb-common
-  - mariadb-server
-  - mariadb-client
-
-# Python APT library selection
-python_apt_pkg: "{{ 'python3-apt' if __use_python3_apt else 'python-apt' }}"
-
-# Final MySQL/MariaDB package list
-__mysql_packages: >-
-  {{
-    (__mysql_packages_mariadb + [python_apt_pkg])
-      if __use_mariadb
-      else __mysql_packages
-  }}
+__mysql_daemon: mysql
 
 __mysql_slow_query_log_file: /var/log/mysql/mysql-slow.log
 
@@ -62,11 +20,7 @@ mysql_socket: /var/run/mysqld/mysqld.sock
 # ======================
 repo_config_dir: /etc/apt/sources.list.d
 repo_config_path: /etc/apt/sources.list.d/s9s-repo.list
-
-# ClusterControl main repository
 repo_config_url: http://www.severalnines.com/downloads/cmon/s9s-repo.list
 
-# s9s-tools repository
-# Uses distribution codename (e.g. buster, bullseye, jammy)
 clustercontrol_cli_repository: "deb https://repo.severalnines.com/s9s-tools/{{ ansible_distribution_release }}/ ./"
 clustercontrol_cli_key: "http://repo.severalnines.com/s9s-tools/{{ ansible_distribution_release }}/Release.key"
