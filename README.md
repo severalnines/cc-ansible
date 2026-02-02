@@ -30,7 +30,6 @@ Supported database clusters:
 More details at [Severalnines](http://www.severalnines.com) website.
 
 
----
 
 ## Requirements
 
@@ -38,7 +37,6 @@ More details at [Severalnines](http://www.severalnines.com) website.
 - Root access or sudo privileges
 - Using Key-based Authentication for SSH / Passwordless SSH
 
----
 
 ## Installation
 
@@ -89,7 +87,6 @@ More details at [Severalnines](http://www.severalnines.com) website.
     ansible-playbook -i inventory/hosts playbook.yml
     ```
 
----
 ### Example Playbook    
 
 - Example Playbook for installation.  
@@ -123,11 +120,19 @@ Access UI:
   https://<clustercontrol-host>/
   ```
 
----
 
 ## Usage  
 
 This role is only capable of installing ClusterControl version `2.2` and above, which utilizes MCC as the web server. Once the installation is complete you require to create the default admin user by specifying a username (username "admin" is reserved) and password on the welcome page.
+
+### Version Selection
+
+To select a specific version, you can define the `clustercontrol_version` variable in your playbook. Supported values include:
+
+- `latest` : Installs the most recent version available.
+- Specific version (e.g., `2.3.3`): Picks the designated package, with a fallback to latest if not found. Please refer to the [release notes]( https://docs.severalnines.com/clustercontrol/latest/release-notes/) page.
+
+Please note that the s9s CLI packages will always be installed as the latest version.
 
 ### Using Vault in playbooks
 The following example shows the steps to use Ansible Vault to encrypt the ``mysql_root_password`` and ``cmon_mysql_password`` configured on the ClusterControl host.
@@ -219,17 +224,6 @@ The following example shows the steps to use Ansible Vault to encrypt the ``mysq
      ansible-playbook --vault-id=dev@password-file -i inventory/hosts playbook.yml
     ```
 
----
-### Version Selection
-
-To select a specific version, you can define the `clustercontrol_version` variable in your playbook. Supported values include:
-
-- `latest` : Installs the most recent version available.
-- Specific version (e.g., `2.3.3`): Picks the designated package, with a fallback to latest if not found. Please refer to the [release notes]( https://docs.severalnines.com/clustercontrol/latest/release-notes/) page.
-
-Please note that the s9s CLI packages will always be installed as the latest version.
-
----
 
 ## Idempotency & Upgrades
 This role supports idempotency and ClusterControl upgrades, simply adjust the `clustercontrol_version` value in your playbook to proceed. To ensure a safe and consistent execution, the process follows these rules:
@@ -239,7 +233,6 @@ This role supports idempotency and ClusterControl upgrades, simply adjust the `c
 - Safe to re-run playbook
 - Safe to upgrade by changing `clustercontrol_version`
 
----
 
 ## Supported Platforms
 This role is built on top of Ansible v2.17.14 and compatible on the following operating systems :
@@ -250,7 +243,6 @@ This role is built on top of Ansible v2.17.14 and compatible on the following op
 - Ubuntu 22.04/24.04 LTS
 - Debian 10.x/11.x/12.x
 
----
 
 ## Author
 
