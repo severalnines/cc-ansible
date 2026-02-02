@@ -129,6 +129,96 @@ Access UI:
 
 This role is only capable of installing ClusterControl version `2.2` and above, which utilizes MCC as the web server. Once the installation is complete you require to create the default admin user by specifying a username (username "admin" is reserved) and password on the welcome page.
 
+### Using Vault in playbooks
+The following example shows the steps to use Ansible Vault to encrypt the ``mysql_root_password`` and ``cmon_mysql_password`` configured on the ClusterControl host.
+
+- ``mysql_root_password``: admin123
+- ``cmon_mysql_password``: admin123
+
+1) Create a password file to encrypt variables on the host where the playbook resides, called ``password-file``:
+
+    ```bash
+    $  echo -n 'admin123' > password-file
+    ```
+      
+
+2) Generate the Vault value for ``mysql_root_password`` variable using the same password file:
+
+    ```bash
+    $ echo -n 'admin123' | ansible-vault encrypt_string --vault-id dev@password-file --stdin-name 'mysql_root_password'
+    Reading plaintext input from stdin. (ctrl-d to end input, twice if your content does not already have a newline)
+
+    Encryption successful
+    mysql_root_password: !vault |
+              $ANSIBLE_VAULT;1.2;AES256;dev
+              63656662666337663062373532313264366135643732323166666563666563653036363666346432
+              6335643637313630646565633337326663383038663830640a373433633265366337323839323134
+              63613139633965653331626362333734333134393463666336616332636562376532316230336434
+              6638323630663066380a343332643537623864653161363839306131333438626534336634313364
+              3339
+    ```
+
+3) Generate the Vault value for ``cmon_mysql_password`` variable using the same password file:
+
+    ```bash
+    $ echo -n 'admin123' | ansible-vault encrypt_string --vault-id dev@password-file --stdin-name 'cmon_mysql_password'
+    Reading plaintext input from stdin. (ctrl-d to end input, twice if your content does not already have a newline)
+
+    Encryption successful
+    cmon_mysql_password: !vault |
+              $ANSIBLE_VAULT;1.2;AES256;dev
+              62623633643436316135656466303162356239396664396563316366363937366630633433653833
+              3061623439633563663363393163366562633531376532350a616132386261626565613264303030
+              63343936333266386234316665643334366136346462386537626165613835353935316139663863
+              3936326639363137650a643631623364333035303365636538386639643235643439363566636530
+              6435
+    ```
+
+4) Then add the vaults variables into the playbook:
+
+    ```yml
+    - hosts: cc
+      become: yes
+
+      vars:
+        #credentials
+        mysql_root_password: !vault |
+              $ANSIBLE_VAULT;1.2;AES256;dev
+              63656662666337663062373532313264366135643732323166666563666563653036363666346432
+              6335643637313630646565633337326663383038663830640a373433633265366337323839323134
+              63613139633965653331626362333734333134393463666336616332636562376532316230336434
+              6638323630663066380a343332643537623864653161363839306131333438626534336634313364
+              3339
+        cmon_mysql_password: !vault |
+              $ANSIBLE_VAULT;1.2;AES256;dev
+              62623633643436316135656466303162356239396664396563316366363937366630633433653833
+              3061623439633563663363393163366562633531376532350a616132386261626565613264303030
+              63343936333266386234316665643334366136346462386537626165613835353935316139663863
+              3936326639363137650a643631623364333035303365636538386639643235643439363566636530
+              6435
+
+        cc_install_mode: "mcc"
+        cc_package_state: "latest"
+
+        clustercontrol_version: "latest" #"2.3.3"
+
+        mcc_web_port: 443
+        mcc_web_root: "/var/www/html/clustercontrol-mcc"
+
+      roles:
+        - cc-ansible
+    ```
+
+5) Run the playbook with correct vault ID:
+
+    ```bash
+    $ ansible-playbook --vault-id=dev@password-file playbook.yml
+    ```
+    Or
+    ```bash
+     ansible-playbook --vault-id=dev@password-file -i inventory/hosts playbook.yml
+    ```
+
 ---
 ### Version Selection
 
