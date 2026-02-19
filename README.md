@@ -78,8 +78,8 @@ More details at [Severalnines](http://www.severalnines.com) website.
    
 
 3) Create playbooks. Refer to the [Example Playbook](#example-playbook) section or [examples](/tree/master/examples) directory.
-
-4) Run the playbook.
+4) Create the Ansible inventory host file and save it within the inventory/ folder. 
+5) Run the playbook.
 
     ```bash
     ansible-playbook playbook.yml 
