@@ -10,7 +10,7 @@
 
 - name: Enable CRB repository (RHEL 9 only, required by EPEL)
   ansible.builtin.command: dnf config-manager --set-enabled crb
-  when: ansible_distribution_major_version | int == 9
+  when: ansible_facts.distribution_major_version | int == 9
   changed_when: false
   failed_when: false
 
@@ -34,7 +34,7 @@
 
 - name: Install MySQL 8.4 community repo RPM
   ansible.builtin.yum:
-    name: "https://repo.mysql.com/mysql84-community-release-el{{ ansible_distribution_major_version }}-1.noarch.rpm"
+    name: "https://repo.mysql.com/mysql84-community-release-el{{ ansible_facts.distribution_major_version }}-1.noarch.rpm"
     state: present
 
 - name: Enable MySQL 8.4 repo, disable older repos

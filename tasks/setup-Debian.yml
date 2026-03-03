@@ -16,7 +16,7 @@
 # ---------------------------------------
 - name: Compute Debian/Ubuntu major version as int
   ansible.builtin.set_fact:
-    __deb_major: "{{ ansible_distribution_major_version | int }}"
+    __deb_major: "{{ ansible_facts.distribution_major_version | int }}"
   changed_when: false
 
 - name: Compute apt python binding flag (Debian/Ubuntu)
@@ -146,7 +146,7 @@
     state: present
   when:
     - ansible_distribution == 'Ubuntu'
-    - ansible_distribution_major_version|int <= 18
+    - ansible_facts.distribution_major_version|int <= 18
 
 - name: Making sure MySQL Python3 libraries are installed (Ubuntu > 18).
   ansible.builtin.apt:
@@ -154,7 +154,7 @@
     state: present
   when:
     - ansible_distribution == 'Ubuntu'
-    - ansible_distribution_major_version|int > 18
+    - ansible_facts.distribution_major_version|int > 18
 
 - name: Making sure MySQL is stopped after initial install.
   ansible.builtin.service:
@@ -284,7 +284,8 @@
       {{
         (
           clustercontrol_controller_packages
-          | map('regex_replace', '$', '=' ~ _cc_deb_ver_map[item])
+          | zip(clustercontrol_controller_packages | map('extract', _cc_deb_ver_map))
+          | map('join', '=')
           | list
         )
         if (cc_pin_version and cc_semver_only)
@@ -302,7 +303,8 @@
       {{
         (
           clustercontrol_ui_packages
-          | map('regex_replace', '$', '=' ~ _cc_deb_ver_map[item])
+          | zip(clustercontrol_ui_packages | map('extract', _cc_deb_ver_map))
+          | map('join', '=')
           | list
         )
         if (cc_pin_version and cc_semver_only)
@@ -316,9 +318,6 @@
           if cc_pin_version else clustercontrol_ui_packages
         )
       }}
-  vars:
-    # dummy var needed by jinja in map() expression; not used in non-semver branches
-    item: ""
   changed_when: false
 
 - name: Installing ClusterControl Controller packages (from repo).
