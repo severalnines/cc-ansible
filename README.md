@@ -21,7 +21,7 @@ The following packages will be installed by this role:
 Installs ClusterControl for new database deployments or on top of existing database clusters.
 ClusterControl is a management and automation platform for database clusters — it helps deploy, monitor, manage, and scale your database infrastructure.
 
-**Supported database clusters:**
+Supported database clusters:
 
 - MySQL/MariaDB Replication
 - Percona XtraDB Cluster
@@ -37,16 +37,14 @@ More details at the [Severalnines website](https://www.severalnines.com).
 
 ## Requirements
 
-- ClusterControl server must run on a **clean dedicated host** with internet access
-- Root access or sudo privileges
-- Key-based (passwordless) SSH authentication
+- ClusterControl server must run on a **clean dedicated host** with internet access.
+- Root access or sudo privileges.
+- Key-based (passwordless) SSH authentication.
 
 
 ## Installation
 
-### 1. Set Up the Role
-
-Create an Ansible working directory:
+1) Create an Ansible working directory:
 
 ```bash
 mkdir -p ~/ansible-clustercontrol/{inventory,roles}
@@ -58,15 +56,15 @@ cd ~/ansible-clustercontrol
 
 Alternatively, use the default Ansible directory: `/etc/ansible/`.
 
-### 2. Get the Role
+2) Get the ClusterControl Ansible role from Ansible Galaxy or Github.
 
-**From Ansible Galaxy** (recommended, always stable):
+Ansible Galaxy (always stable from master branch):
 
 ```bash
 ansible-galaxy install severalnines.cc-ansible
 ```
 
-**From GitHub** (master branch):
+Github (master branch):
 
 ```bash
 git clone https://github.com/severalnines/cc-ansible
@@ -82,18 +80,16 @@ cp -rf cc-ansible /etc/ansible/roles/cc-ansible
 cp -rf cc-ansible ~/ansible-clustercontrol/roles/cc-ansible
 ```
 
-### 3. Create Inventory
-
-Create `inventory/hosts` and add your ClusterControl target server:
+3) Create the Ansible inventory file and save it in the `inventory/` folder.
 
 ```ini
 [clustercontrol]
 your-cc-host ansible_user=root
 ```
 
-### 4. Create and Run the Playbook
+4) Create a playbook. Refer to the Example Playbook section below.
 
-Create a `playbook.yml` (see Example Playbook section below), then run:
+5) Run the playbook.
 
 ```bash
 ansible-playbook -i inventory/hosts playbook.yml
@@ -141,26 +137,31 @@ This role installs ClusterControl `2.2` and above, which uses MCC as the web ser
 
 ### Version Selection
 
-Set the `clustercontrol_version` variable in your playbook:
+Set the `clustercontrol_version` variable in your playbook. Supported values:
 
-- `"latest"` — Installs the most recent available version
-- `"2.3.3"` — Installs the specified version (falls back to latest if not found)
+- `"latest"` — Installs the most recent available version.
+- Specific version (e.g. `"2.3.3"`) — Installs the designated package, with a fallback to latest if not found.
 
 **Note:** The `s9s-tools` package is always installed as the latest version regardless of `clustercontrol_version`.
 
 See the [release notes](https://docs.severalnines.com/clustercontrol/latest/release-notes/) for available versions.
 
-### Using Ansible Vault
+### Using Vault in playbooks
 
 It is strongly recommended to encrypt sensitive variables using Ansible Vault instead of storing plaintext passwords in your playbook.
 
-**Step 1:** Create a password file:
+Variables you may want to encrypt:
+
+- `mysql_root_password`
+- `cmon_mysql_password`
+
+1) Create a password file on the host where the playbook resides:
 
 ```bash
 echo -n 'myVaultPassword' > password-file
 ```
 
-**Step 2:** Encrypt `mysql_root_password`:
+2) Generate the Vault value for `mysql_root_password`:
 
 ```bash
 echo -n 'admin123' | ansible-vault encrypt_string \
@@ -168,7 +169,7 @@ echo -n 'admin123' | ansible-vault encrypt_string \
   --stdin-name 'mysql_root_password'
 ```
 
-**Step 3:** Encrypt `cmon_mysql_password`:
+3) Generate the Vault value for `cmon_mysql_password`:
 
 ```bash
 echo -n 'admin123' | ansible-vault encrypt_string \
@@ -176,7 +177,7 @@ echo -n 'admin123' | ansible-vault encrypt_string \
   --stdin-name 'cmon_mysql_password'
 ```
 
-**Step 4:** Add the encrypted values to your playbook:
+4) Add the encrypted values to your playbook:
 
 ```yaml
 - hosts: clustercontrol
@@ -184,20 +185,20 @@ echo -n 'admin123' | ansible-vault encrypt_string \
 
   vars:
     mysql_root_password: !vault |
-      $ANSIBLE_VAULT;1.2;AES256;dev
-      63656662666337663062373532313264366135643732323166666563666563653036363666346432
-      6335643637313630646565633337326663383038663830640a373433633265366337323839323134
-      63613139633965653331626362333734333134393463666336616332636562376532316230336434
-      6638323630663066380a343332643537623864653161363839306131333448626534336634313364
-      3339
+          $ANSIBLE_VAULT;1.2;AES256;dev
+          63656662666337663062373532313264366135643732323166666563666563653036363666346432
+          6335643637313630646565633337326663383038663830640a373433633265366337323839323134
+          63613139633965653331626362333734333134393463666336616332636562376532316230336434
+          6638323630663066380a343332643537623864653161363839306131333448626534336634313364
+          3339
 
     cmon_mysql_password: !vault |
-      $ANSIBLE_VAULT;1.2;AES256;dev
-      62623633643436316135656466303162356239396664396563316366363937366630633433653833
-      3061623439633563663363393163366562633531376532350a616132386261626565613264303030
-      63343936333266386234316665643334366136346462386537626165613835353935316139663863
-      3936326639363137650a643631623364333035303365636538386639643235643439363566636530
-      6435
+          $ANSIBLE_VAULT;1.2;AES256;dev
+          62623633643436316135656466303162356239396664396563316366363937366630633433653833
+          3061623439633563663363393163366562633531376532350a616132386261626565613264303030
+          63343936333266386234316665643334366136346462386537626165613835353935316139663863
+          3936326639363137650a643631623364333035303365636538386639643235643439363566636530
+          6435
 
     cc_install_mode: "mcc"
     cc_package_state: "latest"
@@ -209,7 +210,7 @@ echo -n 'admin123' | ansible-vault encrypt_string \
     - cc-ansible
 ```
 
-**Step 5:** Run the playbook with the vault ID:
+5) Run the playbook with the vault ID:
 
 ```bash
 ansible-playbook --vault-id=dev@password-file -i inventory/hosts playbook.yml
@@ -218,22 +219,22 @@ ansible-playbook --vault-id=dev@password-file -i inventory/hosts playbook.yml
 
 ## Idempotency & Upgrades
 
-This role is designed for safe re-runs and in-place upgrades:
+This role supports idempotency and ClusterControl upgrades. To ensure a safe and consistent execution, the process follows these rules:
 
-- **MySQL initialization** runs only once (marker-guarded)
-- **CMON and MCC initialization** are marker-guarded and skipped on subsequent runs
-- **Safe to re-run** — no duplicate actions on existing installations
-- **Upgrade** by changing `clustercontrol_version` and re-running the playbook
+- MySQL initialization runs only once during first installation.
+- CMON and MCC initialization are marker-guarded.
+- Safe to re-run the playbook.
+- Safe to upgrade by changing `clustercontrol_version`.
 
 
 ## Supported Platforms
 
-This role is built on Ansible `v2.17.14` and supports the following operating systems:
+This role is built on top of Ansible `v2.17.14` and is compatible on the following operating systems:
 
 - Red Hat Enterprise Linux 8.x / 9.x
 - Rocky Linux 8.x / 9.x
 - AlmaLinux 8.x / 9.x
-- Ubuntu LTS 22.04 / 24.04
+- Ubuntu 22.04 / 24.04 LTS
 - Debian 10.x / 11.x / 12.x
 
 
