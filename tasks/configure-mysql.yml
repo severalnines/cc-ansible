@@ -68,7 +68,7 @@
     cmon_mysql_hosts:
       - "localhost"
       - "127.0.0.1"
-      - "{{ ansible_default_ipv4.address }}"
+      - "{{ ansible_facts['default_ipv4']['address'] }}"
   changed_when: false
 
 - name: Check if cmon user exists and matches mysql_native_password + password (per host)

@@ -97,7 +97,7 @@
     state: present
 
 - name: Configure known_hosts value for itself.
-  shell: ssh-keyscan -H {{ ansible_default_ipv4.address }} >> {{ cmon_ssh_key_dir }}/known_hosts
+  shell: ssh-keyscan -H {{ ansible_facts['default_ipv4']['address'] }} >> {{ cmon_ssh_key_dir }}/known_hosts
   when: ssh_key_user.stat.exists == false
 
 - name: Remove temp local known_hosts copies.

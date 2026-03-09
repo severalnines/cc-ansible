@@ -96,7 +96,7 @@
     --mysql-username="{{ cmon_mysql_user | default('cmon') }}"
     --mysql-password="{{ cmon_mysql_password }}"
     --mysql-database="cmon"
-    --hostname="{{ ansible_default_ipv4.address }}"
+    --hostname="{{ ansible_facts['default_ipv4']['address'] }}"
     --rpc-token="{{ cc_api_token }}"
     --controller-id="clustercontrol"
   register: cmon_init

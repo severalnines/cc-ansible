@@ -23,8 +23,8 @@
   ansible.builtin.set_fact:
     __use_python3_apt: >-
       {{
-        (ansible_distribution == 'Debian' and ((__deb_major | int) >= 11)) or
-        (ansible_distribution == 'Ubuntu' and ((__deb_major | int) >= 20))
+        (ansible_facts['distribution'] == 'Debian' and ((__deb_major | int) >= 11)) or
+        (ansible_facts['distribution'] == 'Ubuntu' and ((__deb_major | int) >= 20))
       }}
   changed_when: false
 
@@ -145,7 +145,7 @@
     name: python-mysqldb
     state: present
   when:
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts['distribution'] == 'Ubuntu'
     - ansible_facts.distribution_major_version|int <= 18
 
 - name: Making sure MySQL Python3 libraries are installed (Ubuntu > 18).
@@ -153,7 +153,7 @@
     name: python3-mysqldb
     state: present
   when:
-    - ansible_distribution == 'Ubuntu'
+    - ansible_facts['distribution'] == 'Ubuntu'
     - ansible_facts.distribution_major_version|int > 18
 
 - name: Making sure MySQL is stopped after initial install.
