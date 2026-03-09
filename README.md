@@ -59,7 +59,7 @@ More details at [Severalnines](http://www.severalnines.com) website.
       - Ansible Galaxy (always stable from master branch):
 
           ```bash
-          ansible-galaxy install severalnines.cc-ansible
+          ansible-galaxy install severalnines.clustercontrol
           ```
 
       - Github (*master branch*):
@@ -111,7 +111,7 @@ More details at [Severalnines](http://www.severalnines.com) website.
       mcc_web_root: "/var/www/html/clustercontrol-mcc"
 
     roles:
-      - severalnines.cc-ansible
+      - severalnines.clustercontrol
   ```
 Access UI:  
 - Once the installation is complete, you can access the ClusterControl UI at : 
