@@ -61,7 +61,7 @@ Alternatively, use the default Ansible directory: `/etc/ansible/`.
 Ansible Galaxy (always stable from master branch):
 
 ```bash
-ansible-galaxy install severalnines.cc-ansible
+ansible-galaxy install severalnines.clustercontrol
 ```
 
 Github (master branch):
