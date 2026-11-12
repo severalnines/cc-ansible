@@ -69,10 +69,13 @@
 
     # cmon >= 2.5.1 serves TLS RPC v2 on 9500 (9501 is a deprecated copy that
     # goes away in 2.6); 2.5.0 serves it only on 9501, plain-HTTP RPC v1 on 9500.
+    # Probe for up to 20 s (plus one probe round) while cmon starts.
     rpc_port=9501
-    for i in $(seq 1 20); do
+    deadline=$((SECONDS + 20))
+    while :; do
       if curl -k -s -o /dev/null -m 3 https://127.0.0.1:9500; then rpc_port=9500; break; fi
       if curl -k -s -o /dev/null -m 3 https://127.0.0.1:9501; then break; fi
+      ((SECONDS + 1 < deadline)) || break
       sleep 1
     done
 
