@@ -67,17 +67,40 @@
   ansible.builtin.shell: |
     export S9S_USER_CONFIG=/tmp/ccsetup.conf
 
-    s9s user --create \
-      --new-password=admin \
-      --group=admins \
-      --controller="https://localhost:9501" \
-      ccsetup || true
+    # cmon >= 2.5.1 serves TLS RPC v2 on 9500 (9501 is a deprecated copy that
+    # goes away in 2.6); 2.5.0 serves it only on 9501, plain-HTTP RPC v1 on 9500.
+    # Probe for up to 20 s (plus one probe round) while cmon starts.
+    rpc_port=
+    deadline=$((SECONDS + 20))
+    while :; do
+      if curl -k -s -o /dev/null -m 3 https://127.0.0.1:9500; then rpc_port=9500; break; fi
+      if curl -k -s -o /dev/null -m 3 https://127.0.0.1:9501; then rpc_port=9501; break; fi
+      ((SECONDS + 1 < deadline)) || break
+      sleep 1
+    done
 
-    unset S9S_USER_CONFIG
+    # Neither port answered TLS: fail here rather than register ccsetup
+    # against a controller URL that answers nothing.
+    if [ -z "$rpc_port" ]; then
+      echo "cmon RPC did not answer TLS on 9500 or 9501 within 20 s; not creating ccsetup" >&2
+      exit 1
+    fi
+
+    # Let a real failure through; a re-run (ccsetup already there) is fine.
+    if ! out=$(s9s user --create \
+        --new-password=admin \
+        --group=admins \
+        --controller="https://localhost:${rpc_port}" \
+        ccsetup 2>&1); then
+      echo "$out"
+      if printf '%s' "$out" | grep -qi 'already exists'; then exit 0; fi
+      exit 1
+    fi
+    echo "$out"
   args:
     executable: /bin/bash
   register: ccsetup_user_create
   changed_when: >
     ccsetup_user_create.stdout is defined and
     ('created' in (ccsetup_user_create.stdout | lower))
-  failed_when: false
+  failed_when: ccsetup_user_create.rc != 0
